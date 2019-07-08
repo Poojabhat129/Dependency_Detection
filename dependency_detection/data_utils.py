@@ -16,13 +16,19 @@ class DataUtils(object):
         for wheel in range(number_of_wheels):
             wheel_data = None
             for k in keys:
-                if wheel_data is None:
-                    wheel_data = np.array(csv_data[k].values)[:, np.newaxis]
+                if k != '%time':
+                    # get the key for current wheel index
+                    current_key = k.replace('0', str(wheel))
                 else:
-                    wheel_data = np.hstack((wheel_data, np.array(csv_data[k].values)[:, np.newaxis]))
+                    current_key = k
+
+                if wheel_data is None:
+                    wheel_data = np.array(csv_data[current_key].values)[:, np.newaxis]
+                else:
+                    wheel_data = np.hstack((wheel_data, np.array(csv_data[current_key].values)[:, np.newaxis]))
                 if (wheel == 0):
-                    if k != '%time':
-                        variable_name = k.split('.')[-1]
+                    if current_key != '%time':
+                        variable_name = current_key.split('.')[-1]
                     else:
                         variable_name = 'timestamp'
                     variables.append(variable_name)

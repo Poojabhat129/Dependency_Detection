@@ -22,6 +22,10 @@ class GrangerCausality(object):
         for r in results:
             pvalues.append(results[r][0]['ssr_ftest'][1])
         pvalues = np.array(pvalues)
+        mean_pvalue = np.mean(pvalues)
+        std_pvalue = np.std(pvalues)
+        pvalues = pvalues[pvalues >= mean_pvalue - std_pvalue]
+        pvalues = pvalues[pvalues <= mean_pvalue + std_pvalue]
         causal = False
         if (np.min(pvalues) < self.significance_level):
             causal = True

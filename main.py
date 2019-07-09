@@ -11,8 +11,8 @@ from dependency_detection.data_utils import DataUtils
 from dependency_detection.granger_causality import GrangerCausality
 
 
-def plot_data(data, all_variables, var1, var2, event_times=None):
-    wheel_index = 1
+def plot_data(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, variable_units, event_times=None):
+    wheel_index = 0
     x1 = data[wheel_index][:, all_variables.index(var1)]
     x2 = data[wheel_index][:, all_variables.index(var2)]
     t = data[wheel_index][:, all_variables.index('timestamp')]
@@ -21,8 +21,10 @@ def plot_data(data, all_variables, var1, var2, event_times=None):
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
     var1_plot, = ax1.plot(t, x1, color='m')
     ax1.set_title(var1)
+    ax1.set_ylabel(var1 + '(' + variable_units[var1] + ')')
     var2_plot, = ax2.plot(t, x2, color='b')
     ax2.set_title(var2)
+    ax2.set_ylabel(var2 + '(' + variable_units[var2] + ')')
     # set current axis
     plt.sca(ax1)
     plt.legend([var1_plot, var2_plot], [var1, var2])
@@ -33,31 +35,40 @@ def plot_data(data, all_variables, var1, var2, event_times=None):
     fig.tight_layout()
     plt.show()
 
-def plot_windowed_granger(data, all_variables, var1, var2, window_size, granger_causality, event_times=None):
+def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, granger_causality, variable_units, event_times=None):
     start_row_index = 0
     p_values = np.zeros((window_size-1,))
-    wheel_index = 1
     while True:
-        window_data = DataUtils.get_window(data[wheel_index], start_row_index, window_size)
-        if window_data is None:
+        window_data_1 = DataUtils.get_window(data[wheel_index_1], start_row_index, window_size)
+        window_data_2 = DataUtils.get_window(data[wheel_index_2], start_row_index, window_size)
+        if window_data_1 is None or window_data_2 is None:
             break
-        x1 = window_data[:, all_variables.index(var1)]
-        x2 = window_data[:, all_variables.index(var2)]
+        x1 = window_data_1[:, all_variables.index(var1)]
+        x2 = window_data_2[:, all_variables.index(var2)]
         causal, lag, p_value = granger_causality.is_granger_causal(x1, x2)
         p_values = np.hstack((p_values, p_value))
         start_row_index += 1
-    x1 = data[wheel_index][:, all_variables.index(var1)]
-    x2 = data[wheel_index][:, all_variables.index(var2)]
-    t = data[wheel_index][:, all_variables.index('timestamp')]
+    x1 = data[wheel_index_1][:, all_variables.index(var1)]
+    x2 = data[wheel_index_2][:, all_variables.index(var2)]
+    t = data[wheel_index_1][:, all_variables.index('timestamp')]
     t = [datetime.datetime.fromtimestamp(val) for val in t]
+
+    nans = np.zeros((window_size,))
+    nans.fill(np.nan)
+    p_values = np.hstack((p_values, nans))
+    p_values = p_values[window_size:window_size+x1.shape[0]]
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
     var1_plot, = ax1.plot(t, x1, color='m')
     ax1.set_title(var1)
+    ax1.set_ylabel(var1 + ' (' + variable_units[var1] + ')')
     var2_plot, = ax2.plot(t, x2, color='b')
     ax2.set_title(var2)
+    ax2.set_ylabel(var2 + ' (' + variable_units[var2] + ')')
     pval_plot, = ax3.plot(t, p_values, color='g')
+    ax3.set_ylim([0.0, 1.0])
     ax3.set_title('p-values')
+    ax3.set_ylabel('p-value')
     # set current axis
     plt.sca(ax1)
     plt.legend([var1_plot, var2_plot, pval_plot], [var1, var2, 'p-value'])
@@ -71,15 +82,15 @@ def plot_windowed_granger(data, all_variables, var1, var2, window_size, granger_
     fig.tight_layout()
     plt.show()
 
-def generate_heatmap(data, all_variables, selected_variables, granger_causality):
+def generate_heatmap(data, all_variables, selected_variables, granger_causality, wheel_index_1, wheel_index_2):
     fig, ax = plt.subplots(figsize=(10,10))
     p_values = np.empty((len(selected_variables), len(selected_variables)))
     imvalues = np.empty((len(selected_variables), len(selected_variables)))
     for idx1, v1 in enumerate(selected_variables):
         for idx2, v2 in enumerate(selected_variables):
             # only use data from wheel 1
-            x1 = data[0][:, all_variables.index(v1)]
-            x2 = data[0][:, all_variables.index(v2)]
+            x1 = data[wheel_index_1][:, all_variables.index(v1)]
+            x2 = data[wheel_index_2][:, all_variables.index(v2)]
             causal, lag, p_value = granger_causality.is_granger_causal(x1, x2, lag=30)
             p_value = np.around(p_value, decimals=2)
             p_values[idx1, idx2] = p_value
@@ -101,6 +112,8 @@ def generate_heatmap(data, all_variables, selected_variables, granger_causality)
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     ax.set_title("p-values")
     fig.tight_layout()
+    plt.show()
+    plt.savefig('data/heatmap.png')
 
 
 def main():
@@ -112,13 +125,17 @@ def main():
     parser.add_argument('--significance_level', nargs='?', default=0.05, type=float)
     parser.add_argument('--plot_type', nargs='?', choices=['heatmap', 'timeseries', 'simple_plot'], default='timeseries')
     parser.add_argument('--window_size', nargs='?', default=45, type=int, help='window size used for timeseries plots')
-    parser.add_argument('--var1', nargs='?', default='velocity_1', type=str, help='Variable 1 used for timeseries plots')
-    parser.add_argument('--var2', nargs='?', default='current_1_q', type=str, help='Variable 2 used for timeseries plots')
+    parser.add_argument('--wheel1', nargs='?', default=0, type=int, choices=[0, 1, 2, 3], help='Wheel index for variable 1 used for timeseries and heatmap plots')
+    parser.add_argument('--var1', nargs='?', default='current_1_w', type=str, help='Variable 1 used for timeseries plots')
+    parser.add_argument('--wheel2', nargs='?', default=0, type=int, choices=[0, 1, 2, 3], help='Wheel index for variable 2 used for timeseries and heatmap plots')
+    parser.add_argument('--var2', nargs='?', default='current_2_w', type=str, help='Variable 2 used for timeseries plots')
+
 
     args = parser.parse_args()
 
     config = yaml.load(open('config/config.yaml'))
     selected_variables = config['granger_tests']['selected_variables']
+    variable_units = config['variable_units']
     granger_causality = GrangerCausality(significance_level=args.significance_level)
 
     event_times = None
@@ -130,6 +147,7 @@ def main():
         data_topic = config['rosbag_config']['data_topic']
         event_topic = config['rosbag_config']['event_topic']
         data, all_variables = DataUtils.load_data_rosbag(args.ds, data_topic, commands_attr, sensors_attr, number_of_wheels)
+        data = DataUtils.remove_nan_inf(data)
         event_times = DataUtils.load_events_rosbag(args.ds, event_topic)
     elif (args.dstype == 'csv'):
         keys = config['csv_config']['keys']
@@ -149,17 +167,19 @@ def main():
         data = DataUtils.remove_nan_inf(data)
         event_times = DataUtils.load_events_blackbox(args.ds, event_coll)
 
+    wheel_index_1 = args.wheel1
+    wheel_index_2 = args.wheel2
     if (args.plot_type == 'heatmap'):
-        generate_heatmap(data, all_variables, selected_variables, granger_causality)
+        generate_heatmap(data, all_variables, selected_variables, granger_causality, wheel_index_1, wheel_index_2)
     elif (args.plot_type == 'timeseries'):
         var1 = args.var1
         var2 = args.var2
         window_size = args.window_size
-        plot_windowed_granger(data, all_variables, var1, var2, window_size, granger_causality, event_times)
+        plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, granger_causality, variable_units, event_times)
     elif (args.plot_type == 'simple_plot'):
         var1 = args.var1
         var2 = args.var2
-        plot_data(data, all_variables, var1, var2, event_times)
+        plot_data(data, all_variables, var1, var2, variable_units, event_times)
 
 if __name__ == "__main__":
     main()

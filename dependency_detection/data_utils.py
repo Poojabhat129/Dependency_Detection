@@ -41,21 +41,21 @@ class DataUtils(object):
         return data, variables
 
     @staticmethod
-    def load_data_rosbag(filename, topic, command_attr, sensor_attr, number_of_wheels):
+    def load_data_rosbag(filename, topic, commands_attr, sensors_attr, number_of_wheels):
         import rosbag
         bag = rosbag.Bag(filename)
         data = None
         variables = ['timestamp']
-        variables.extend(command_attr)
-        variables.extend(sensor_attr)
+        variables.extend(commands_attr)
+        variables.extend(sensors_attr)
         for topic, msg, t in bag.read_messages(topics=[topic]):
             data_sample = []
             for i in range(number_of_wheels):
                 row = []
                 row.append(t.to_time())
-                for c in command_attr:
+                for c in commands_attr:
                     row.append(getattr(msg.commands[i], c))
-                for s in sensor_attr:
+                for s in sensors_attr:
                     row.append(getattr(msg.sensors[i], s))
                 data_sample.append(row)
 
@@ -78,7 +78,60 @@ class DataUtils(object):
         return event_times
 
     @staticmethod
+    def load_data_blackbox(db_name, collection_name, commands_attr, sensors_attr, number_of_wheels):
+        import pymongo as pm
+        client = pm.MongoClient()
+        db = client[db_name]
+        coll = db[collection_name]
+        docs = coll.find({})
+
+        data = None
+        variables = ['timestamp']
+        variables.extend(commands_attr)
+        variables.extend(sensors_attr)
+        for doc in docs:
+            data_sample = []
+            for i in range(number_of_wheels):
+                row = []
+                row.append(doc['timestamp'])
+                for c in commands_attr:
+                    row.append(doc['commands'][i][c])
+                for s in sensors_attr:
+                    row.append(doc['sensors'][i][s])
+                data_sample.append(row)
+            data_sample = np.array(data_sample)
+            if (data is None):
+                data = data_sample[np.newaxis, :, :]
+            else:
+                data = np.vstack((data, data_sample[np.newaxis, :, :]))
+        data = np.swapaxes(data, 0, 1)
+        return data, variables
+
+    @staticmethod
+    def load_events_blackbox(db_name, collection_name):
+        import pymongo as pm
+        client = pm.MongoClient()
+        db = client[db_name]
+        coll = db[collection_name]
+        docs = coll.find({})
+
+        event_times = []
+        for doc in docs:
+            etime = float(doc['stamp']['secs']) + float(doc['stamp']['nsecs']) / (10**9)
+            event_times.append(etime)
+        return event_times
+
+    @staticmethod
     def get_window(data, start_row_index, window_size):
         if start_row_index + window_size > data.shape[0]:
             return None
         return data[start_row_index:start_row_index+window_size]
+
+    @staticmethod
+    def remove_nan_inf(data):
+        data[np.where(np.isnan(data))] = 0.0
+        data[np.where(np.isinf(data))] = 0.0
+        data[np.where(abs(data) > 1e10)] = 0.0
+        noise = np.random.normal(0, 0.001, data.shape)
+        data += noise
+        return data

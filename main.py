@@ -11,17 +11,39 @@ from dependency_detection.data_utils import DataUtils
 from dependency_detection.granger_causality import GrangerCausality
 
 
+def plot_data(data, all_variables, var1, var2, event_times=None):
+    wheel_index = 1
+    x1 = data[wheel_index][:, all_variables.index(var1)]
+    x2 = data[wheel_index][:, all_variables.index(var2)]
+    t = data[wheel_index][:, all_variables.index('timestamp')]
+    t = [datetime.datetime.fromtimestamp(val) for val in t]
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    var1_plot, = ax1.plot(t, x1, color='m')
+    ax1.set_title(var1)
+    var2_plot, = ax2.plot(t, x2, color='b')
+    ax2.set_title(var2)
+    # set current axis
+    plt.sca(ax1)
+    plt.legend([var1_plot, var2_plot], [var1, var2])
+    if (event_times is not None):
+        for e in event_times:
+            ax1.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
+            ax2.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
+    fig.tight_layout()
+    plt.show()
+
 def plot_windowed_granger(data, all_variables, var1, var2, window_size, granger_causality, event_times=None):
     start_row_index = 0
     p_values = np.zeros((window_size-1,))
-    wheel_index = 0
+    wheel_index = 1
     while True:
         window_data = DataUtils.get_window(data[wheel_index], start_row_index, window_size)
         if window_data is None:
             break
         x1 = window_data[:, all_variables.index(var1)]
         x2 = window_data[:, all_variables.index(var2)]
-        causal, lag, p_value = granger_causality.is_granger_causal(x1, x2, lag=13)
+        causal, lag, p_value = granger_causality.is_granger_causal(x1, x2)
         p_values = np.hstack((p_values, p_value))
         start_row_index += 1
     x1 = data[wheel_index][:, all_variables.index(var1)]
@@ -83,10 +105,12 @@ def generate_heatmap(data, all_variables, selected_variables, granger_causality)
 
 def main():
     parser = argparse.ArgumentParser(description='Dependency detection using Granger Causality tests')
-    parser.add_argument('dstype', type=str, choices=['rosbag', 'csv', 'blackboxdb'], help='Data source type')
+    parser.add_argument('dstype', type=str, choices=['rosbag', 'csv', 'blackbox'], help='Data source type')
     parser.add_argument('ds', type=str, help='Data source (file location, database name etc.)')
+    parser.add_argument('--data_collection', default=None, type=str, help='collection containing smart wheel data')
+    parser.add_argument('--event_collection', default=None, type=str, help='collection containing event annotations')
     parser.add_argument('--significance_level', nargs='?', default=0.05, type=float)
-    parser.add_argument('--plot_type', nargs='?', choices=['heatmap', 'timeseries'], default='timeseries')
+    parser.add_argument('--plot_type', nargs='?', choices=['heatmap', 'timeseries', 'simple_plot'], default='timeseries')
     parser.add_argument('--window_size', nargs='?', default=45, type=int, help='window size used for timeseries plots')
     parser.add_argument('--var1', nargs='?', default='velocity_1', type=str, help='Variable 1 used for timeseries plots')
     parser.add_argument('--var2', nargs='?', default='current_1_q', type=str, help='Variable 2 used for timeseries plots')
@@ -111,6 +135,19 @@ def main():
         keys = config['csv_config']['keys']
         number_of_wheels = config['csv_config']['number_of_wheels']
         data, all_variables = DataUtils.load_data_csv(args.ds, keys, number_of_wheels)
+    elif (args.dstype == 'blackbox'):
+        commands_attr = config['blackbox_config']['commands']
+        sensors_attr = config['blackbox_config']['sensors']
+        number_of_wheels = config['blackbox_config']['number_of_wheels']
+        data_coll = args.data_collection
+        event_coll = args.event_collection
+        if (data_coll is None):
+            data_coll = config['blackbox_config']['default_data_collection']
+        if (event_coll is None):
+            event_coll = config['blackbox_config']['default_event_collection']
+        data, all_variables = DataUtils.load_data_blackbox(args.ds, data_coll, commands_attr, sensors_attr, number_of_wheels)
+        data = DataUtils.remove_nan_inf(data)
+        event_times = DataUtils.load_events_blackbox(args.ds, event_coll)
 
     if (args.plot_type == 'heatmap'):
         generate_heatmap(data, all_variables, selected_variables, granger_causality)
@@ -119,6 +156,10 @@ def main():
         var2 = args.var2
         window_size = args.window_size
         plot_windowed_granger(data, all_variables, var1, var2, window_size, granger_causality, event_times)
+    elif (args.plot_type == 'simple_plot'):
+        var1 = args.var1
+        var2 = args.var2
+        plot_data(data, all_variables, var1, var2, event_times)
 
 if __name__ == "__main__":
     main()

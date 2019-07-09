@@ -28,7 +28,4 @@ class GrangerCausality(object):
         return causal, np.argmin(pvalues), np.min(pvalues)
 
     def find_optimal_lag(self, x1, x2):
-        '''
-        TODO: calculate this based on length of data?
-        '''
-        return 30
+        return int((x1.shape[0] - 1) / 3) - 1

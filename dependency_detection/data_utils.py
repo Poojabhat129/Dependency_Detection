@@ -135,3 +135,18 @@ class DataUtils(object):
         noise = np.random.normal(0, 0.001, data.shape)
         data += noise
         return data
+
+    @staticmethod
+    def binary_threshold(values, threshold):
+        thresholded_values = np.zeros(values.shape)
+        thresholded_values[values > threshold] = 1.0
+        return thresholded_values
+
+    @staticmethod
+    def get_gt(data, event_times, event_window=5):
+        gt = np.zeros((data.shape[-2],))
+        timestamps = data[0, :, 0]
+        for e in event_times:
+            idx = np.argmax(timestamps > e)
+            gt[idx:idx+event_window] = 1.0
+        return gt

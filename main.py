@@ -85,6 +85,8 @@ def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_
             ax1.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
             ax2.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
             ax3.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
+        ground_truth = DataUtils.get_gt(data, event_times)
+        gt_plot, = ax3.plot(t, ground_truth, color='b')
     fig.tight_layout()
     return plt
 
@@ -175,14 +177,14 @@ def main():
     wheel_index_2 = args.wheel2
     if (args.plot_type == 'heatmap'):
         plt = generate_heatmap(data, all_variables, selected_variables, wheel_index_1, wheel_index_2, args.significance_level)
-        plt.savefig('images/' + args.ds + '_' + args.dstype + '_wheel' + str(wheel_index_1) + '_wheel' + str(wheel_index_2) + '_heatmap.png')
+        plt.savefig('images/' + args.dstype + '_' + args.ds.replace('/', '_') + '_wheel' + str(wheel_index_1) + '_wheel' + str(wheel_index_2) + '_heatmap.png')
         plt.show()
     elif (args.plot_type == 'timeseries'):
         var1 = args.var1
         var2 = args.var2
         window_size = args.window_size
         plt = plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, variable_units, args.significance_level, event_times)
-        plt.savefig('images/' + args.ds + '_' + args.dstype + '_' + str(wheel_index_1) + '_' + var1 + '_' + str(wheel_index_2) + '_' + var2 + '.png' )
+        plt.savefig('images/' + args.dstype + '_' + args.ds.replace('/', '_') + '_' + str(wheel_index_1) + '_' + var1 + '_' + str(wheel_index_2) + '_' + var2 + '.png' )
         plt.show()
     elif (args.plot_type == 'simple_plot'):
         var1 = args.var1

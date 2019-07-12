@@ -8,23 +8,22 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from dependency_detection.data_utils import DataUtils
-from dependency_detection.granger_causality import GrangerCausality
+from dependency_detection.dependency_detection import DependencyDetection
 
 
 def plot_data(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, variable_units, event_times=None):
-    wheel_index = 0
-    x1 = data[wheel_index][:, all_variables.index(var1)]
-    x2 = data[wheel_index][:, all_variables.index(var2)]
-    t = data[wheel_index][:, all_variables.index('timestamp')]
+    x1 = data[wheel_index_1][:, all_variables.index(var1)]
+    x2 = data[wheel_index_2][:, all_variables.index(var2)]
+    t = data[wheel_index_1][:, all_variables.index('timestamp')]
     t = [datetime.datetime.fromtimestamp(val) for val in t]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
     var1_plot, = ax1.plot(t, x1, color='m')
-    ax1.set_title(var1)
-    ax1.set_ylabel(var1 + '(' + variable_units[var1] + ')')
+    ax1.set_title('wheel ' + str(wheel_index_1) + ' - ' + var1)
+    ax1.set_ylabel(var1 + ' (' + variable_units[var1] + ')')
     var2_plot, = ax2.plot(t, x2, color='b')
-    ax2.set_title(var2)
-    ax2.set_ylabel(var2 + '(' + variable_units[var2] + ')')
+    ax2.set_title('wheel ' + str(wheel_index_2) + ' - ' + var2)
+    ax2.set_ylabel(var2 + ' (' + variable_units[var2] + ')')
     # set current axis
     plt.sca(ax1)
     plt.legend([var1_plot, var2_plot], [var1, var2])
@@ -35,9 +34,10 @@ def plot_data(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, var
     fig.tight_layout()
     plt.show()
 
-def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, granger_causality, variable_units, event_times=None):
+def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, variable_units, significance_level, event_times=None):
     start_row_index = 0
     p_values = np.zeros((window_size-1,))
+    corr_coeffs = np.zeros((window_size-1,))
     while True:
         window_data_1 = DataUtils.get_window(data[wheel_index_1], start_row_index, window_size)
         window_data_2 = DataUtils.get_window(data[wheel_index_2], start_row_index, window_size)
@@ -45,7 +45,9 @@ def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_
             break
         x1 = window_data_1[:, all_variables.index(var1)]
         x2 = window_data_2[:, all_variables.index(var2)]
-        causal, lag, p_value = granger_causality.is_granger_causal(x1, x2)
+        causal, lag, p_value = DependencyDetection.is_granger_causal(x1, x2, significance_level=significance_level)
+        corr_coeff = DependencyDetection.get_correlation_coefficient(x1, x2)
+        corr_coeffs = np.hstack((corr_coeffs, corr_coeff))
         p_values = np.hstack((p_values, p_value))
         start_row_index += 1
     x1 = data[wheel_index_1][:, all_variables.index(var1)]
@@ -58,20 +60,24 @@ def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_
     p_values = np.hstack((p_values, nans))
     p_values = p_values[window_size:window_size+x1.shape[0]]
 
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
+    corr_coeffs = np.hstack((corr_coeffs, nans))
+    corr_coeffs = corr_coeffs[window_size:window_size+x1.shape[0]]
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, figsize=(10,10))
     var1_plot, = ax1.plot(t, x1, color='m')
-    ax1.set_title(var1)
+    ax1.set_title('wheel ' + str(wheel_index_1) + ' - ' + var1)
     ax1.set_ylabel(var1 + ' (' + variable_units[var1] + ')')
     var2_plot, = ax2.plot(t, x2, color='b')
-    ax2.set_title(var2)
+    ax2.set_title('wheel ' + str(wheel_index_2) + ' - ' + var2)
     ax2.set_ylabel(var2 + ' (' + variable_units[var2] + ')')
     pval_plot, = ax3.plot(t, p_values, color='g')
-    ax3.set_ylim([0.0, 1.0])
-    ax3.set_title('p-values')
-    ax3.set_ylabel('p-value')
+    corr_plot, = ax3.plot(t, corr_coeffs, color='r')
+    ax3.set_ylim([-1.0, 1.0])
+    ax3.set_title('p-values and correlation coefficients')
+    ax3.set_ylabel('p-value / corr coeff')
     # set current axis
     plt.sca(ax1)
-    plt.legend([var1_plot, var2_plot, pval_plot], [var1, var2, 'p-value'])
+    plt.legend([var1_plot, var2_plot, pval_plot, corr_plot], [var1, var2, 'p-value', 'corr coeff'])
     plt.sca(ax3)
     plt.axhline(y=0.05, color='r', linestyle=':')
     if (event_times is not None):
@@ -79,10 +85,12 @@ def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_
             ax1.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
             ax2.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
             ax3.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
+        ground_truth = DataUtils.get_gt(data, event_times)
+        gt_plot, = ax3.plot(t, ground_truth, color='b')
     fig.tight_layout()
-    plt.show()
+    return plt
 
-def generate_heatmap(data, all_variables, selected_variables, granger_causality, wheel_index_1, wheel_index_2):
+def generate_heatmap(data, all_variables, selected_variables, wheel_index_1, wheel_index_2, significance_level):
     fig, ax = plt.subplots(figsize=(10,10))
     p_values = np.empty((len(selected_variables), len(selected_variables)))
     imvalues = np.empty((len(selected_variables), len(selected_variables)))
@@ -91,7 +99,7 @@ def generate_heatmap(data, all_variables, selected_variables, granger_causality,
             # only use data from wheel 1
             x1 = data[wheel_index_1][:, all_variables.index(v1)]
             x2 = data[wheel_index_2][:, all_variables.index(v2)]
-            causal, lag, p_value = granger_causality.is_granger_causal(x1, x2, lag=30)
+            causal, lag, p_value = DependencyDetection.is_granger_causal(x1, x2, lag=30, significance_level=significance_level)
             p_value = np.around(p_value, decimals=2)
             p_values[idx1, idx2] = p_value
             if (causal):
@@ -112,8 +120,7 @@ def generate_heatmap(data, all_variables, selected_variables, granger_causality,
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     ax.set_title("p-values")
     fig.tight_layout()
-    plt.show()
-    plt.savefig('data/heatmap.png')
+    return plt
 
 
 def main():
@@ -136,7 +143,6 @@ def main():
     config = yaml.load(open('config/config.yaml'))
     selected_variables = config['granger_tests']['selected_variables']
     variable_units = config['variable_units']
-    granger_causality = GrangerCausality(significance_level=args.significance_level)
 
     event_times = None
 
@@ -170,16 +176,20 @@ def main():
     wheel_index_1 = args.wheel1
     wheel_index_2 = args.wheel2
     if (args.plot_type == 'heatmap'):
-        generate_heatmap(data, all_variables, selected_variables, granger_causality, wheel_index_1, wheel_index_2)
+        plt = generate_heatmap(data, all_variables, selected_variables, wheel_index_1, wheel_index_2, args.significance_level)
+        plt.savefig('images/' + args.dstype + '_' + args.ds.replace('/', '_') + '_wheel' + str(wheel_index_1) + '_wheel' + str(wheel_index_2) + '_heatmap.png')
+        plt.show()
     elif (args.plot_type == 'timeseries'):
         var1 = args.var1
         var2 = args.var2
         window_size = args.window_size
-        plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, granger_causality, variable_units, event_times)
+        plt = plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, variable_units, args.significance_level, event_times)
+        plt.savefig('images/' + args.dstype + '_' + args.ds.replace('/', '_') + '_' + str(wheel_index_1) + '_' + var1 + '_' + str(wheel_index_2) + '_' + var2 + '.png' )
+        plt.show()
     elif (args.plot_type == 'simple_plot'):
         var1 = args.var1
         var2 = args.var2
-        plot_data(data, all_variables, var1, var2, variable_units, event_times)
+        plot_data(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, variable_units, event_times)
 
 if __name__ == "__main__":
     main()

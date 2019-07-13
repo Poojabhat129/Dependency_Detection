@@ -150,3 +150,45 @@ class DataUtils(object):
             idx = np.argmax(timestamps > e)
             gt[idx:idx+event_window] = 1.0
         return gt
+
+    @staticmethod
+    def get_num_false_positives(values, threshold, ground_truth):
+        bt = DataUtils.binary_threshold(values, threshold)
+        num_fp = 0
+        for idx, b in enumerate(bt):
+            if idx == 0:
+                continue
+            if ground_truth[idx] == 0 and (b != ground_truth[idx] and bt[idx-1] != b):
+                num_fp += 1
+        return num_fp
+
+    @staticmethod
+    def get_false_positive_duration(values, threshold, ground_truth):
+        bt = DataUtils.binary_threshold(values, threshold)
+        fp_duration = 0
+        for idx, b in enumerate(bt):
+            if idx == 0:
+                continue
+            if ground_truth[idx] == 0 and b != ground_truth[idx]:
+                fp_duration += 1
+        return fp_duration
+
+    @staticmethod
+    def get_detection_lag_and_tp(values, threshold, ground_truth, max_lag=50):
+        bt = DataUtils.binary_threshold(values, threshold)
+        gt_indices = []
+        for idx,g in enumerate(ground_truth):
+            if g == 1 and ground_truth[idx - 1] == 0:
+                gt_indices.append(idx)
+
+        lags = []
+        tp = 0
+        for gt_idx in gt_indices:
+            remaining_detection = bt[gt_idx:]
+            detection_idx = np.where(remaining_detection == 1)[0]
+            if detection_idx.size == 0:
+                continue
+            if (np.min(detection_idx) < max_lag):
+                tp += 1
+            lags.append(np.min(detection_idx))
+        return lags, tp

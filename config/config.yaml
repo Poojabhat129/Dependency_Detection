@@ -130,16 +130,29 @@ granger_tests:
         - 'setpoint1'
         - 'setpoint2'
         - 'encoder_1'
+        - 'velocity_1'
+        - 'current_1_d'
+        - 'current_1_q'
         - 'current_1_u'
         - 'current_1_v'
         - 'current_1_w'
         - 'voltage_1'
+        - 'voltage_1_u'
+        - 'voltage_1_v'
+        - 'voltage_1_w'
         - 'encoder_2'
+        - 'velocity_2'
+        - 'current_2_d'
+        - 'current_2_q'
         - 'current_2_u'
         - 'current_2_v'
         - 'current_2_w'
         - 'voltage_2'
+        - 'voltage_2_u'
+        - 'voltage_2_v'
+        - 'voltage_2_w'
         - 'encoder_pivot'
+        - 'velocity_pivot'
         - 'accel_x'
         - 'accel_y'
         - 'accel_z'
@@ -147,7 +160,31 @@ granger_tests:
         - 'gyro_y'
         - 'gyro_z'
         - 'voltage_bus'
-        - 'pressure'
+    variable_pairs:
+        - ['current_1_q', 'setpoint1']
+        - ['current_2_q', 'setpoint2']
+        - ['velocity_1', 'current_1_q']
+        - ['velocity_2', 'current_2_q']
+        - ['current_1_u', 'current_2_u']
+        - ['current_2_u', 'current_1_u']
+        - ['velocity_pivot', 'gyro_y']
+    inter_wheel_pairs:
+        - ['current_1_q', 'current_1_q']
+        - ['current_2_q', 'current_2_q']
+        - ['encoder_1', 'velocity_1']
+    datasets:
+        - ['blackbox', 'disconnected_wheels', 3, 1]
+        - ['blackbox', 'wall_collisions', 0, 1]
+        - ['blackbox', 'platform_pushes', 0, 1]
+        - ['rosbag', '20190709_bump_3_in_to_out_0.6.bag', 0, 1]
+        - ['rosbag', '20190709_bump_4_in_to_out_0.6.bag', 0, 1]
+        - ['rosbag', '20190709_bump_5_in_to_out_0.6.bag', 0, 1]
+        - ['rosbag', '20190709_extra_load_unload.bag', 0, 1]
+        - ['rosbag', '20190709_extra_load_unload_2.bag', 0, 1]
+        - ['rosbag', '20190709_blocked_unblocked.bag', 0, 1]
+        - ['rosbag', '20190709_blocked_unblocked_2.bag', 0, 1]
+        - ['rosbag', '20190709_blocked_2.bag', 0, 1]
+        - ['rosbag', '20190709_wheel_slippage.bag', 0, 1]
 variable_units:
      {
     'setpoint1': 'Amp',

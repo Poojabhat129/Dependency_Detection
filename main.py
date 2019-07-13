@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 import datetime
 import argparse
+import os
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -33,6 +34,47 @@ def plot_data(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, var
             ax2.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
     fig.tight_layout()
     plt.show()
+
+def evaluate_windowed(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, variable_units, significance_level, event_times=None):
+    start_row_index = 0
+    p_values = np.zeros((window_size-1,))
+    corr_coeffs = np.zeros((window_size-1,))
+    while True:
+        window_data_1 = DataUtils.get_window(data[wheel_index_1], start_row_index, window_size)
+        window_data_2 = DataUtils.get_window(data[wheel_index_2], start_row_index, window_size)
+        if window_data_1 is None or window_data_2 is None:
+            break
+        x1 = window_data_1[:, all_variables.index(var1)]
+        x2 = window_data_2[:, all_variables.index(var2)]
+        causal, lag, p_value = DependencyDetection.is_granger_causal(x1, x2, significance_level=significance_level)
+        corr_coeff = DependencyDetection.get_correlation_coefficient(x1, x2)
+        corr_coeffs = np.hstack((corr_coeffs, corr_coeff))
+        p_values = np.hstack((p_values, p_value))
+        start_row_index += 1
+
+    nans = np.zeros((window_size,))
+    nans.fill(np.nan)
+    p_values = np.hstack((p_values, nans))
+    p_values = p_values[window_size:window_size+x1.shape[0]]
+
+    corr_coeffs = np.hstack((corr_coeffs, nans))
+    corr_coeffs = corr_coeffs[window_size:window_size+x1.shape[0]]
+    if (event_times is not None):
+        ground_truth = DataUtils.get_gt(data, event_times)
+        fp = DataUtils.get_num_false_positives(p_values, significance_level, ground_truth)
+        fp_duration = DataUtils.get_false_positive_duration(p_values, significance_level, ground_truth)
+        detection_lags, tp = DataUtils.get_detection_lag_and_tp(p_values, significance_level, ground_truth)
+        num_events = len(event_times)
+        fn = num_events - tp
+        total_duration = data.shape[1]
+        print('FP: ', fp)
+        print('FP duration: ', fp_duration)
+        print('total duration: ', total_duration)
+        print('Detection lags:', detection_lags)
+        print('TP:', tp)
+        print('FN:', fn)
+        print('num events: ', num_events)
+        return tp, fp, fp_duration, fn, detection_lags, total_duration
 
 def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, variable_units, significance_level, event_times=None):
     start_row_index = 0
@@ -79,7 +121,7 @@ def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_
     plt.sca(ax1)
     plt.legend([var1_plot, var2_plot, pval_plot, corr_plot], [var1, var2, 'p-value', 'corr coeff'])
     plt.sca(ax3)
-    plt.axhline(y=0.05, color='r', linestyle=':')
+    plt.axhline(y=significance_level, color='r', linestyle=':')
     if (event_times is not None):
         for e in event_times:
             ax1.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
@@ -87,6 +129,9 @@ def plot_windowed_granger(data, all_variables, wheel_index_1, var1, wheel_index_
             ax3.axvline(x=datetime.datetime.fromtimestamp(e), color='#3b7fed', linestyle=':')
         ground_truth = DataUtils.get_gt(data, event_times)
         gt_plot, = ax3.plot(t, ground_truth, color='b')
+        print('FP: ', DataUtils.get_num_false_positives(p_values, significance_level, ground_truth))
+        print('FP durations: ', DataUtils.get_false_positive_duration(p_values, significance_level, ground_truth))
+        print('Detection lags, TP:', DataUtils.get_detection_lag_and_tp(p_values, significance_level, ground_truth))
     fig.tight_layout()
     return plt
 
@@ -106,7 +151,7 @@ def generate_heatmap(data, all_variables, selected_variables, wheel_index_1, whe
                 imvalues[idx2, idx1] = 0.0
             else:
                 imvalues[idx2, idx1] = 0.5
-            txt = ax.text(idx1, idx2, p_value, ha="center", va="center")
+            #txt = ax.text(idx1, idx2, p_value, ha="center", va="center")
 
     im = ax.imshow(imvalues,'Blues')
     divider = make_axes_locatable(ax)
@@ -123,9 +168,56 @@ def generate_heatmap(data, all_variables, selected_variables, wheel_index_1, whe
     return plt
 
 
+def run_all_tests(config, args):
+    single_wheel_variable_pairs = config['granger_tests']['variable_pairs']
+    inter_wheel_pairs = config['granger_tests']['inter_wheel_pairs']
+    datasets = config['granger_tests']['datasets']
+    variable_units = config['variable_units']
+    data_root = args.ds
+    for pair in single_wheel_variable_pairs:
+        wheel_index_1 = 0
+        wheel_index_2 = 0
+        for ds in datasets:
+            dstype = ds[0]
+            ds_location = ds[1]
+            wheel_index_1 = int(ds[2])
+            wheel_index_2 = int(ds[2])
+            event_times = None
+            if dstype == 'blackbox':
+                commands_attr = config['blackbox_config']['commands']
+                sensors_attr = config['blackbox_config']['sensors']
+                number_of_wheels = config['blackbox_config']['number_of_wheels']
+                data_coll = args.data_collection
+                event_coll = args.event_collection
+                if (data_coll is None):
+                    data_coll = config['blackbox_config']['default_data_collection']
+                if (event_coll is None):
+                    event_coll = config['blackbox_config']['default_event_collection']
+                data, all_variables = DataUtils.load_data_blackbox(ds_location, data_coll, commands_attr, sensors_attr, number_of_wheels)
+                data = DataUtils.remove_nan_inf(data)
+                event_times = DataUtils.load_events_blackbox(ds_location, event_coll)
+            elif dstype == 'rosbag':
+                commands_attr = config['rosbag_config']['commands']
+                sensors_attr = config['rosbag_config']['sensors']
+                number_of_wheels = config['rosbag_config']['number_of_wheels']
+                data_topic = config['rosbag_config']['data_topic']
+                event_topic = config['rosbag_config']['event_topic']
+                ds_location = os.path.join(data_root, ds_location)
+                data, all_variables = DataUtils.load_data_rosbag(ds_location, data_topic, commands_attr, sensors_attr, number_of_wheels)
+                data = DataUtils.remove_nan_inf(data)
+                event_times = DataUtils.load_events_rosbag(ds_location, event_topic)
+            var1 = pair[0]
+            var2 = pair[1]
+            window_size = args.window_size
+            print('Evaluating pair ' + str(pair) + ' on ' + str(dstype) + ' ' + str(ds_location))
+            tp, fp, fp_duration, fn, detection_lags, total_duration = evaluate_windowed(data, all_variables, wheel_index_1, var1, wheel_index_2, var2, window_size, variable_units, args.significance_level, event_times)
+            print('-------------------------------------')
+            plt.savefig('images/' + dstype + '_' + ds_location.replace('/', '_') + '_' + str(wheel_index_1) + '_' + var1 + '_' + str(wheel_index_2) + '_' + var2 + '.png' )
+
+
 def main():
     parser = argparse.ArgumentParser(description='Dependency detection using Granger Causality tests')
-    parser.add_argument('dstype', type=str, choices=['rosbag', 'csv', 'blackbox'], help='Data source type')
+    parser.add_argument('dstype', type=str, choices=['rosbag', 'csv', 'blackbox', 'config'], help='Data source type')
     parser.add_argument('ds', type=str, help='Data source (file location, database name etc.)')
     parser.add_argument('--data_collection', default=None, type=str, help='collection containing smart wheel data')
     parser.add_argument('--event_collection', default=None, type=str, help='collection containing event annotations')
@@ -172,6 +264,9 @@ def main():
         data, all_variables = DataUtils.load_data_blackbox(args.ds, data_coll, commands_attr, sensors_attr, number_of_wheels)
         data = DataUtils.remove_nan_inf(data)
         event_times = DataUtils.load_events_blackbox(args.ds, event_coll)
+    elif (args.dstype == 'config'):
+        run_all_tests(config, args)
+
 
     wheel_index_1 = args.wheel1
     wheel_index_2 = args.wheel2
